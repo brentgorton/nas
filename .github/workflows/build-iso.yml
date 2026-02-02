@@ -1,0 +1,101 @@
+name: Build Debian 12 NAS ISO
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'preseed/**'
+      - 'scripts/**'
+      - '.github/workflows/build-iso.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'preseed/**'
+      - 'scripts/**'
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create a release with the ISO'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xorriso cpio gzip wget isolinux
+
+      - name: Build ISO
+        run: ./scripts/build-iso.sh
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-12-nas-amd64
+          path: output/debian-12-nas-amd64.iso
+          retention-days: 30
+
+      - name: Get ISO checksum
+        id: checksum
+        run: |
+          cd output
+          sha256sum debian-12-nas-amd64.iso > debian-12-nas-amd64.iso.sha256
+          echo "sha256=$(cat debian-12-nas-amd64.iso.sha256)" >> $GITHUB_OUTPUT
+
+      - name: Upload checksum artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-12-nas-amd64-checksum
+          path: output/debian-12-nas-amd64.iso.sha256
+          retention-days: 30
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true'
+
+    steps:
+      - name: Download ISO artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: debian-12-nas-amd64
+          path: output
+
+      - name: Download checksum artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: debian-12-nas-amd64-checksum
+          path: output
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ github.run_number }}
+          name: NAS ISO Build ${{ github.run_number }}
+          body: |
+            Automated build of Debian 12 NAS ISO.
+
+            ## Checksums
+            ```
+            $(cat output/debian-12-nas-amd64.iso.sha256)
+            ```
+
+            ## Installation
+            1. Download the ISO
+            2. Create a new VM in Proxmox
+            3. Boot from the ISO
+            4. Installation will proceed automatically
+            5. After reboot, install the NAS management package
+          files: |
+            output/debian-12-nas-amd64.iso
+            output/debian-12-nas-amd64.iso.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

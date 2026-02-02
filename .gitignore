@@ -1,3 +1,8 @@
+# ISO build artifacts
+build/
+output/
+*.iso
+
 # Logs
 logs
 *.log
