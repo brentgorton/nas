@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build custom Debian 12 NAS ISO with preseed automation
+# Build custom Debian NAS ISO with preseed automation
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -7,12 +7,13 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="${PROJECT_DIR}/build"
 OUTPUT_DIR="${PROJECT_DIR}/output"
 
-# Debian 12 (Bookworm) netinst ISO
-DEBIAN_VERSION="12.9.0"
+# Debian 13 (Trixie) netinst ISO - current stable
+DEBIAN_VERSION="13.3.0"
+DEBIAN_CODENAME="trixie"
 DEBIAN_ARCH="amd64"
 DEBIAN_ISO_URL="https://cdimage.debian.org/debian-cd/current/${DEBIAN_ARCH}/iso-cd/debian-${DEBIAN_VERSION}-${DEBIAN_ARCH}-netinst.iso"
 DEBIAN_ISO_FILENAME="debian-${DEBIAN_VERSION}-${DEBIAN_ARCH}-netinst.iso"
-OUTPUT_ISO="debian-12-nas-${DEBIAN_ARCH}.iso"
+OUTPUT_ISO="debian-13-nas-${DEBIAN_ARCH}.iso"
 
 # Colors for output
 RED='\033[0;31m'
@@ -147,7 +148,7 @@ rebuild_iso() {
 
     # Build the new ISO with both BIOS and UEFI support
     xorriso -as mkisofs \
-        -r -V "Debian 12 NAS" \
+        -r -V "Debian 13 NAS" \
         -o "${OUTPUT_DIR}/${OUTPUT_ISO}" \
         -J -joliet-long \
         -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
@@ -171,7 +172,7 @@ cleanup() {
 }
 
 main() {
-    log_info "Starting Debian 12 NAS ISO build..."
+    log_info "Starting Debian 13 NAS ISO build..."
     log_info "Project directory: ${PROJECT_DIR}"
 
     mkdir -p "$BUILD_DIR"

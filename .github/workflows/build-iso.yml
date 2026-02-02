@@ -39,22 +39,22 @@ jobs:
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
-          name: debian-12-nas-amd64
-          path: output/debian-12-nas-amd64.iso
+          name: debian-13-nas-amd64
+          path: output/debian-13-nas-amd64.iso
           retention-days: 30
 
       - name: Get ISO checksum
         id: checksum
         run: |
           cd output
-          sha256sum debian-12-nas-amd64.iso > debian-12-nas-amd64.iso.sha256
-          echo "sha256=$(cat debian-12-nas-amd64.iso.sha256)" >> $GITHUB_OUTPUT
+          sha256sum debian-13-nas-amd64.iso > debian-13-nas-amd64.iso.sha256
+          echo "sha256=$(cat debian-13-nas-amd64.iso.sha256)" >> $GITHUB_OUTPUT
 
       - name: Upload checksum artifact
         uses: actions/upload-artifact@v4
         with:
-          name: debian-12-nas-amd64-checksum
-          path: output/debian-12-nas-amd64.iso.sha256
+          name: debian-13-nas-amd64-checksum
+          path: output/debian-13-nas-amd64.iso.sha256
           retention-days: 30
 
   release:
@@ -66,13 +66,13 @@ jobs:
       - name: Download ISO artifact
         uses: actions/download-artifact@v4
         with:
-          name: debian-12-nas-amd64
+          name: debian-13-nas-amd64
           path: output
 
       - name: Download checksum artifact
         uses: actions/download-artifact@v4
         with:
-          name: debian-12-nas-amd64-checksum
+          name: debian-13-nas-amd64-checksum
           path: output
 
       - name: Create Release
@@ -85,7 +85,7 @@ jobs:
 
             ## Checksums
             ```
-            $(cat output/debian-12-nas-amd64.iso.sha256)
+            $(cat output/debian-13-nas-amd64.iso.sha256)
             ```
 
             ## Installation
@@ -95,7 +95,7 @@ jobs:
             4. Installation will proceed automatically
             5. After reboot, install the NAS management package
           files: |
-            output/debian-12-nas-amd64.iso
-            output/debian-12-nas-amd64.iso.sha256
+            output/debian-13-nas-amd64.iso
+            output/debian-13-nas-amd64.iso.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
