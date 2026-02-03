@@ -118,6 +118,21 @@ inject_preseed() {
     log_info "Preseed injected into initrd."
 }
 
+copy_packages() {
+    log_info "Copying custom packages..."
+
+    local iso_extract_dir="${BUILD_DIR}/iso_extract"
+    local packages_dir="${PROJECT_DIR}/packages"
+
+    if [ -d "$packages_dir" ] && [ "$(ls -A "$packages_dir"/*.deb 2>/dev/null)" ]; then
+        mkdir -p "${iso_extract_dir}/custom-packages"
+        cp "$packages_dir"/*.deb "${iso_extract_dir}/custom-packages/"
+        log_info "Copied packages to ISO: $(ls "${iso_extract_dir}/custom-packages/")"
+    else
+        log_warn "No .deb packages found in ${packages_dir}"
+    fi
+}
+
 modify_boot_menu() {
     log_info "Modifying boot menu for automated installation..."
 
@@ -238,6 +253,7 @@ main() {
     download_iso
     extract_iso
     inject_preseed
+    copy_packages
     modify_boot_menu
     rebuild_iso
     cleanup
