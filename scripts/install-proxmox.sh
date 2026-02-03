@@ -1,11 +1,16 @@
 #!/bin/bash
 # Deploy NAS VM on Proxmox with disk passthrough
+#
+# Usage:
+#   ./install-proxmox.sh           - Create VM and install OS
+#   ./install-proxmox.sh add-disks - Add passthrough disks to existing VM
+#
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # GitHub repository for ISO releases
-GITHUB_REPO="brentgorton/homelab-nas"
+GITHUB_REPO="brentgorton/nas"
 ISO_FILENAME="debian-13-nas-amd64.iso"
 
 # Colors for output
@@ -25,6 +30,7 @@ ISO_STORAGE=""
 VM_STORAGE=""
 NETWORK_BRIDGE=""
 PASSTHROUGH_DISKS=()
+VMID=""
 
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -223,9 +229,11 @@ download_iso() {
 
     log_info "Fetching latest release from GitHub..."
 
+    local release_info
+    release_info=$(curl -s "https://api.github.com/repos/${GITHUB_REPO}/releases/latest")
+
     local download_url
-    download_url=$(curl -s "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" | \
-                   jq -r '.assets[] | select(.name=="'"${ISO_FILENAME}"'") | .browser_download_url')
+    download_url=$(echo "$release_info" | jq -r '.assets[]? | select(.name=="'"${ISO_FILENAME}"'") | .browser_download_url' 2>/dev/null || true)
 
     if [ -z "$download_url" ] || [ "$download_url" = "null" ]; then
         log_error "Could not find ISO in latest release"
@@ -258,7 +266,7 @@ select_passthrough_disks() {
     echo "Available disks for passthrough:"
     echo ""
 
-    # Get list of physical disks (excluding mounted, loop, and system disks)
+    # Get list of physical disks
     local disks_info
     disks_info=$(lsblk -d -n -o NAME,SIZE,MODEL,TYPE 2>/dev/null | awk '$NF=="disk"' || true)
 
@@ -342,7 +350,7 @@ select_passthrough_disks() {
     fi
 }
 
-show_summary() {
+show_install_summary() {
     log_step "Configuration Summary"
 
     echo ""
@@ -359,16 +367,6 @@ show_summary() {
     echo -e "${BOLD}Installation:${NC}"
     echo "  ISO:          ${ISO_STORAGE}:iso/${ISO_FILENAME}"
     echo ""
-
-    if [ ${#PASSTHROUGH_DISKS[@]} -gt 0 ]; then
-        echo -e "${BOLD}Passthrough Disks:${NC}"
-        local i=1
-        for disk in "${PASSTHROUGH_DISKS[@]}"; do
-            echo "  scsi$i:       $disk"
-            ((i++))
-        done
-        echo ""
-    fi
 
     if ! prompt_yes_no "Proceed with VM creation?"; then
         log_info "Aborted by user"
@@ -392,7 +390,7 @@ create_vm() {
         --agent enabled=1
 
     log_info "Adding system disk..."
-    # Strip 'G' suffix if present - Proxmox expects just the number
+    # Strip non-numeric characters - Proxmox expects just the number
     local disk_size="${VM_DISK_SIZE//[^0-9]/}"
     qm set "$VMID" --scsi0 "${VM_STORAGE}:${disk_size}"
 
@@ -435,16 +433,146 @@ offer_start_vm() {
         log_info "VM started. Access console with: qm terminal $VMID"
         echo ""
         log_info "Or open the Proxmox web UI to view the installation progress"
+        echo ""
+        log_warn "After installation completes, run this script again with 'add-disks' to add storage:"
+        log_info "  ./install-proxmox.sh add-disks"
     else
         echo ""
         log_info "Start the VM later with: qm start $VMID"
+        log_info "After installation, add disks with: ./install-proxmox.sh add-disks"
     fi
 }
 
-main() {
+# ============================================================================
+# Add Disks Mode - Add passthrough disks to existing VM
+# ============================================================================
+
+list_nas_vms() {
+    log_step "Finding NAS VMs"
+
+    local vms
+    vms=$(qm list 2>/dev/null | tail -n +2 || true)
+
+    if [ -z "$vms" ]; then
+        log_error "No VMs found"
+        exit 1
+    fi
+
+    echo "Available VMs:"
+    echo ""
+    echo "$vms" | while read -r line; do
+        local vmid name status
+        vmid=$(echo "$line" | awk '{print $1}')
+        name=$(echo "$line" | awk '{print $2}')
+        status=$(echo "$line" | awk '{print $3}')
+        echo "  $vmid - $name ($status)"
+    done
+    echo ""
+}
+
+select_existing_vm() {
+    list_nas_vms
+
+    while true; do
+        VMID=$(prompt_value "Enter VM ID to add disks to" "")
+
+        if [ -z "$VMID" ]; then
+            log_error "VM ID is required"
+            continue
+        fi
+
+        # Verify VM exists
+        if ! qm status "$VMID" &>/dev/null; then
+            log_error "VM $VMID does not exist"
+            continue
+        fi
+
+        local vm_name
+        vm_name=$(qm config "$VMID" 2>/dev/null | grep "^name:" | awk '{print $2}')
+        log_info "Selected VM: $VMID ($vm_name)"
+        break
+    done
+}
+
+check_vm_stopped() {
+    local status
+    status=$(qm status "$VMID" 2>/dev/null | awk '{print $2}')
+
+    if [ "$status" = "running" ]; then
+        log_warn "VM $VMID is currently running"
+        if prompt_yes_no "Stop VM to add disks?"; then
+            log_info "Stopping VM..."
+            qm stop "$VMID"
+            sleep 3
+        else
+            log_error "Cannot add disks to running VM"
+            exit 1
+        fi
+    fi
+}
+
+fix_boot_order() {
+    log_step "Configuring boot settings"
+
+    # Change boot order to disk first
+    log_info "Setting boot order to disk..."
+    qm set "$VMID" --boot order=scsi0
+
+    # Detach installation CD
+    log_info "Detaching installation ISO..."
+    qm set "$VMID" --ide2 none,media=cdrom
+
+    log_info "Boot configuration updated"
+}
+
+show_disks_summary() {
+    log_step "Disk Configuration Summary"
+
+    echo ""
+    echo -e "${BOLD}VM:${NC} $VMID"
+    echo ""
+    echo -e "${BOLD}Disks to add:${NC}"
+    local i=1
+    for disk in "${PASSTHROUGH_DISKS[@]}"; do
+        echo "  scsi$i: $disk"
+        ((i++))
+    done
+    echo ""
+
+    if ! prompt_yes_no "Proceed with adding disks?"; then
+        log_info "Aborted by user"
+        exit 0
+    fi
+}
+
+offer_start_vm_after_disks() {
+    log_step "Disks Added"
+
+    echo ""
+    log_info "Passthrough disks have been added to VM $VMID"
+    echo ""
+
+    local status
+    status=$(qm status "$VMID" 2>/dev/null | awk '{print $2}')
+
+    if [ "$status" != "running" ]; then
+        if prompt_yes_no "Start VM now?"; then
+            log_info "Starting VM..."
+            qm start "$VMID"
+            log_info "VM started"
+        fi
+    fi
+}
+
+# ============================================================================
+# Main Entry Points
+# ============================================================================
+
+mode_install() {
     echo -e "${BOLD}"
     echo "========================================"
-    echo "  Proxmox NAS VM Deployment Script"
+    echo "  Proxmox NAS VM Deployment"
+    echo "  Phase 1: Create VM & Install OS"
     echo "========================================"
     echo -e "${NC}"
 
@@ -454,14 +582,73 @@ main() {
     select_storage
     select_network
     download_iso
-    select_passthrough_disks
-    show_summary
+    show_install_summary
     create_vm
-    configure_passthrough
     offer_start_vm
 
     echo ""
-    log_info "Deployment complete!"
+    log_info "Phase 1 complete!"
+}
+
+mode_add_disks() {
+    echo -e "${BOLD}"
+    echo "========================================"
+    echo "  Proxmox NAS VM Deployment"
+    echo "  Phase 2: Add Passthrough Disks"
+    echo "========================================"
+    echo -e "${NC}"
+
+    check_dependencies
+    select_existing_vm
+    check_vm_stopped
+    fix_boot_order
+    select_passthrough_disks
+
+    if [ ${#PASSTHROUGH_DISKS[@]} -eq 0 ]; then
+        log_warn "No disks selected"
+        exit 0
+    fi
+
+    show_disks_summary
+    configure_passthrough
+    offer_start_vm_after_disks
+
+    echo ""
+    log_info "Phase 2 complete!"
+}
+
+show_usage() {
+    echo "Usage: $0 [command]"
+    echo ""
+    echo "Commands:"
+    echo "  install     Create VM and install OS (default)"
+    echo "  add-disks   Add passthrough disks to existing VM"
+    echo ""
+    echo "Typical workflow:"
+    echo "  1. Run '$0' to create VM and start installation"
+    echo "  2. Wait for OS installation to complete"
+    echo "  3. Run '$0 add-disks' to add storage drives"
+}
+
+main() {
+    local command="${1:-install}"
+
+    case "$command" in
+        install|"")
+            mode_install
+            ;;
+        add-disks)
+            mode_add_disks
+            ;;
+        -h|--help|help)
+            show_usage
+            ;;
+        *)
+            log_error "Unknown command: $command"
+            show_usage
+            exit 1
+            ;;
+    esac
 }
 
 main "$@"
