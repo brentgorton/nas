@@ -260,7 +260,7 @@ select_passthrough_disks() {
 
     # Get list of physical disks (excluding mounted, loop, and system disks)
     local disks_info
-    disks_info=$(lsblk -d -n -o NAME,SIZE,MODEL,TYPE 2>/dev/null | awk '$4=="disk"' || true)
+    disks_info=$(lsblk -d -n -o NAME,SIZE,MODEL,TYPE 2>/dev/null | awk '$NF=="disk"' || true)
 
     if [ -z "$disks_info" ]; then
         log_warn "No disks found for passthrough"
@@ -392,7 +392,9 @@ create_vm() {
         --agent enabled=1
 
     log_info "Adding system disk..."
-    qm set "$VMID" --scsi0 "${VM_STORAGE}:${VM_DISK_SIZE}"
+    # Strip 'G' suffix if present - Proxmox expects just the number
+    local disk_size="${VM_DISK_SIZE//[^0-9]/}"
+    qm set "$VMID" --scsi0 "${VM_STORAGE}:${disk_size}"
 
     log_info "Attaching ISO..."
     qm set "$VMID" --ide2 "${ISO_STORAGE}:iso/${ISO_FILENAME},media=cdrom"
