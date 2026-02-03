@@ -80,10 +80,11 @@ extract_iso() {
 }
 
 inject_preseed() {
-    log_info "Injecting preseed configuration..."
+    log_info "Injecting preseed configuration and packages..."
 
     local iso_extract_dir="${BUILD_DIR}/iso_extract"
     local initrd_dir="${BUILD_DIR}/initrd"
+    local packages_dir="${PROJECT_DIR}/packages"
 
     # Find the initrd file (mini.iso uses different paths)
     local initrd_path=""
@@ -111,26 +112,20 @@ inject_preseed() {
     # Copy preseed.cfg to initrd root
     cp "${PROJECT_DIR}/preseed/preseed.cfg" "${initrd_dir}/preseed.cfg"
 
+    # Copy custom .deb packages into initrd
+    if [ -d "$packages_dir" ] && [ "$(ls -A "$packages_dir"/*.deb 2>/dev/null)" ]; then
+        mkdir -p "${initrd_dir}/custom-packages"
+        cp "$packages_dir"/*.deb "${initrd_dir}/custom-packages/"
+        log_info "Embedded packages in initrd: $(ls "$packages_dir"/*.deb | xargs -n1 basename)"
+    else
+        log_warn "No .deb packages found in ${packages_dir}"
+    fi
+
     # Repack initrd
     find . | cpio -o -H newc 2>/dev/null | gzip -9 > "$initrd_path"
 
     cd "$PROJECT_DIR"
-    log_info "Preseed injected into initrd."
-}
-
-copy_packages() {
-    log_info "Copying custom packages..."
-
-    local iso_extract_dir="${BUILD_DIR}/iso_extract"
-    local packages_dir="${PROJECT_DIR}/packages"
-
-    if [ -d "$packages_dir" ] && [ "$(ls -A "$packages_dir"/*.deb 2>/dev/null)" ]; then
-        mkdir -p "${iso_extract_dir}/custom-packages"
-        cp "$packages_dir"/*.deb "${iso_extract_dir}/custom-packages/"
-        log_info "Copied packages to ISO: $(ls "${iso_extract_dir}/custom-packages/")"
-    else
-        log_warn "No .deb packages found in ${packages_dir}"
-    fi
+    log_info "Preseed and packages injected into initrd."
 }
 
 modify_boot_menu() {
@@ -253,7 +248,6 @@ main() {
     download_iso
     extract_iso
     inject_preseed
-    copy_packages
     modify_boot_menu
     rebuild_iso
     cleanup
