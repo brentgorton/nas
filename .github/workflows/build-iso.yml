@@ -60,6 +60,9 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: write
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true'
 
     steps:
